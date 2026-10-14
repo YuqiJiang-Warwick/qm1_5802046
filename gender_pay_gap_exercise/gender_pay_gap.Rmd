@@ -1,0 +1,136 @@
+---
+title: "Gender Pay Gap Exercise"
+author: "Yuqi_5802046"
+date: "2026-10-14"
+output: html_document
+---
+# Research question
+Is there a Gender Pay Gap?
+
+# 1. Data Import
+
+```{r}
+library(tidyverse)
+
+pay_gap <- read_csv("Data/UK_gender_pay_gap_2025-26.csv")
+
+glimpse(pay_gap)
+```
+# 2. Data Dictionary
+
+**Note:** I was wondering whether the data dictionary should include all 27 variables in the original dataset, or only the key variable used in our analysis (DiffMeanHourlyPercent). I have included all variables for now, but would a more focused data dictionary be preferable for this exercise?
+
+The dataset contains 27 variables from the UK Government Gender Pay Gap Service (2025–26).
+
+| Variable | Description |
+|---|---|
+| EmployerName | Name of the reporting employer |
+| EmployerId | Unique employer identifier |
+| Address | Employer's address |
+| PostCode | Employer's postcode |
+| CompanyNumber | Registered company number |
+| SicCodes | Industry classification codes |
+| DiffMeanHourlyPercent | Gender pay gap in mean hourly pay (%) |
+| DiffMedianHourlyPercent | Gender pay gap in median hourly pay (%) |
+| DiffMeanBonusPercent | Gender gap in mean bonus pay (%) |
+| DiffMedianBonusPercent | Gender gap in median bonus pay (%) |
+| MaleBonusPercent | Percentage of men receiving a bonus |
+| FemaleBonusPercent | Percentage of women receiving a bonus |
+| MaleLowerQuartile | Male percentage in the lowest pay quartile |
+| FemaleLowerQuartile | Female percentage in the lowest pay quartile |
+| MaleLowerMiddleQuartile | Male percentage in the lower-middle pay quartile |
+| FemaleLowerMiddleQuartile | Female percentage in the lower-middle pay quartile |
+| MaleUpperMiddleQuartile | Male percentage in the upper-middle pay quartile |
+| FemaleUpperMiddleQuartile | Female percentage in the upper-middle pay quartile |
+| MaleTopQuartile | Male percentage in the highest pay quartile |
+| FemaleTopQuartile | Female percentage in the highest pay quartile |
+| CompanyLinkToGPGInfo | Link to additional gender pay gap information |
+| ResponsiblePerson | Person responsible for the report |
+| EmployerSize | Employer size category |
+| CurrentName | Current employer name |
+| SubmittedAfterTheDeadline | Whether the report was submitted late |
+| DueDate | Reporting deadline |
+| DateSubmitted | Date of submission |
+
+# 3. Descriptive Statistics
+
+```{r}
+(pay.gap.summary <- pay_gap %>%
+  summarise(
+    N = sum(!is.na(DiffMeanHourlyPercent)),
+    Mean = mean(DiffMeanHourlyPercent, na.rm=TRUE),
+    Median = median(DiffMeanHourlyPercent, na.rm=TRUE),
+    SD = sd(DiffMeanHourlyPercent, na.rm=TRUE)
+  ))
+```
+
+The gap in mean hourly pay, defined as (male mean−female mean)/male mean×100.So the value of 11.50 means women earned, on average, 11.50% less per hour than men.
+
+# 4. Data Visualisation
+
+```{r, fig.cap="Figure 1. Distribution of the mean hourly gender pay gap across UK employers. Source: UK Government Gender Pay Gap Service, 2025–26.", fig.width=9, fig.height=5}
+
+ggplot(pay_gap, aes(DiffMeanHourlyPercent)) +
+  geom_histogram(binwidth=1) +
+  labs(title="Gender Pay Gap",
+       x="Mean Hourly Gender Pay Gap (%)",
+       y="Frequency")
+```
+```{r}
+quantile(pay_gap$DiffMeanHourlyPercent,
+         probs=c(0, 0.01, 0.05, 0.5, 0.95, 0.99, 1),
+         na.rm=TRUE)
+```
+```{r}
+ggplot(pay_gap, aes(DiffMeanHourlyPercent)) +
+  geom_histogram(binwidth=1) +
+  coord_cartesian(
+    xlim=quantile(pay_gap$DiffMeanHourlyPercent,
+                  c(0.01,0.99), na.rm=TRUE)
+  ) +
+  labs(title="Gender Pay Gap",
+       x="Mean Hourly Gender Pay Gap (%)",
+       y="Frequency")
+```
+
+**Note** : When I plotted the full distribution, a few extreme negative values made the main distribution difficult to see. I therefore used coord_cartesian() to zoom in without excluding observations from the histogram calculation. However, I am unsure how to choose an appropriate axis range. Should this be based on percentiles, or is a visually reasonable range acceptable?
+
+```{r, fig.cap="Figure 1. Distribution of the mean hourly gender pay gap across UK employers in the 2025–26 reporting data. Positive values indicate higher average hourly pay for men than for women within employers. The dashed line marks zero, and the solid red line marks the sample mean. The x-axis is restricted to -50% to 60% to improve readability, while all observations are retained in the statistical analysis.", fig.width=9, fig.height=5}
+
+ggplot(pay_gap, aes(x = DiffMeanHourlyPercent)) +
+  geom_histogram(binwidth = 2, fill = "steelblue", colour = "white") +
+  geom_vline(xintercept = 0, linetype = "dashed", linewidth = 0.8) +
+  geom_vline(xintercept = pay.gap.summary$Mean, colour = "firebrick", linewidth = 1) +
+  coord_cartesian(xlim = c(-50, 60)) +
+  scale_x_continuous(breaks = seq(-50, 60, by = 10)) +
+  labs(
+    title = "Distribution of Gender Pay Gaps",
+    subtitle = "UK employer reports, 2025–26",
+    x = "Mean Hourly Gender Pay Gap (%)",
+    y = "Number of Employers"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(size = 11),
+    plot.caption = element_text(size = 9, hjust = 0)
+  )
+```
+
+# 5. Hypothesis Testing
+
+I use a two-sided one-sample t-test to examine whether the mean gender pay gap across reporting employers is significantly different from zero.
+
+Let $\mu$ denote the population mean of employer-level gender pay gaps.
+
+H0: The mean gender pay gap is zero ($\mu = 0$).
+
+H1: The mean gender pay gap is not zero ($\mu \neq 0$).
+
+```{r}
+t.test(x=pay_gap$DiffMeanHourlyPercent, mu=0)
+```
+# 6. Results and Interpretation
+The mean hourly gender pay gap across UK reporting employers was 11.50%, indicating that men earned more per hour than women on average within employers. A two-sided one-sample *t*-test showed that the mean gap was statistically significant, *t*(11,186) = 76.06, *p* < .001.
+
+**Note**: In the lecture example, the *p*-value was reported as an exact value (*p* = .032). However, my *t*-test produced an extremely small *p*-value (*p* < 2.2e-16). I reported it as *p* < .001 instead. Is this the preferred reporting convention when the *p*-value is extremely small?
