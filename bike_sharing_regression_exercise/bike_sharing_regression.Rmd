@@ -1,0 +1,391 @@
+---
+title: "Bike Sharing Regression Exercise"
+author: "Yuqi_5802046"
+date: "2026-11-04"
+output:
+  html_document: default
+  pdf_document: default
+---
+<style>
+table {
+  width: 100%;
+  table-layout: fixed;
+}
+table col:first-child {
+  width: 18% !important;
+}
+table col:nth-child(2) {
+  width: 82% !important;
+}
+</style>
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(patchwork)
+library(openxlsx)
+
+output_dir <- "Results"
+dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
+
+knitr::opts_chunk$set(
+  dev = "png",
+  fig.path = "Results/Figures/",
+  dpi = 300
+)
+```
+
+
+# 1. Data preparation
+
+```{r}
+bikes <- read_csv("Data/day.csv")
+bikes
+```
+
+
+```{r}
+
+bikes <- bikes |>
+  mutate(
+    temp_c = temp * (39 - (-8)) + (-8),
+    wind_mph = windspeed * 67
+  )
+
+bikes |> select(dteday, cnt, temp_c, wind_mph)
+```
+
+## Descriptive statistics
+
+```{r descriptive-statistics}
+# Use the same complete cases for correlations and all three regressions.
+analysis_data <- bikes |>
+  select(cnt, temp_c, wind_mph) |>
+  drop_na()
+
+variable_labels <- c(
+  cnt = "Daily bike rentals",
+  temp_c = "Temperature (C)",
+  wind_mph = "Wind speed (mph)"
+)
+
+descriptive_stats <- map_dfr(names(variable_labels), function(v) {
+  x <- analysis_data[[v]]
+  tibble(
+    Variable = unname(variable_labels[v]),
+    N = length(x), Mean = mean(x), SD = sd(x),
+    Min = min(x), Max = max(x)
+  )
+})
+
+knitr::kable(descriptive_stats, digits = 2,
+             caption = "Descriptive statistics for the analysis sample")
+```
+
+::: {.data-dictionary}
+
+## Data dictionary
+
+| Variable | Description |
+|:---|:---|
+| `instant` | Index |
+| `dteday` | Date |
+| `season` | Dummy for season (1:spring, 2:summer, 3:fall, 4:winter) |
+| `yr` | Year dummy (0: 2011, 1:2012) |
+| `mnth` | Month |
+| `holiday` | holiday dummy |
+| `weekday` | Day of week |
+| `workingday` | Work-day dummy: if day is neither weekend nor holiday is 1, otherwise is 0 |
+| `weathersit` | Dummy for weather conditions (1: Clear, Few clouds, Partly cloudy, Partly cloudy; 2: Mist + Cloudy, Mist + Broken clouds, Mist + Few clouds, Mist; 3: Light Snow, Light Rain + Thunderstorm + Scattered clouds, Light Rain + Scattered clouds; 4: Heavy Rain + Ice Pallets + Thunderstorm + Mist, Snow + Fog) |
+| `temp` | Normalized temperature in Celsius. The values are derived via (t-t_min)/(t_max-t_min), t_min=-8, t_max=+39 (only in hourly scale) |
+| `atemp` | Normalized feeling temperature in Celsius. The values are derived via (t-t_min)/(t_max-t_min), t_min=-16, t_max=+50 (only in hourly scale) |
+| `hum` | Normalized humidity. The values are divided to 100 (max) |
+| `windspeed` | Normalized wind speed. The values are divided to 67 (max) |
+| `casual` | Count of casual users |
+| `registered` | Count of registered users |
+| `cnt` | Count of total rental bikes including both casual and registered |
+
+### Created variables
+
+| Variable | Description |
+|:---|:---|
+| `temp_c` | Unnormalised temperature in degrees Celsius, calculated as temp × 47 − 8 |
+| `wind_mph` | Unnormalised wind speed in miles per hour, calculated as windspeed × 67 |
+
+# 2. Descriptive analysis
+
+## Univariate plots
+
+```{r}
+ggplot(bikes, aes(x=cnt)) +
+  geom_histogram(bins=25) +
+  labs(x="Daily bike rentals", y="Number of days", title="Bike rentals")
+
+ggplot(bikes, aes(x=temp_c)) +
+  geom_histogram(bins=25) +
+  labs(x="Temperature (C)", y="Number of days", title="Temperature")
+
+ggplot(bikes, aes(x=wind_mph)) +
+  geom_histogram(bins=25) +
+  labs(x="Wind speed (mph)", y="Number of days", title="Wind speed")
+```
+
+## Bivariate plots
+
+```{r bivariate-plots, fig.width=12, fig.height=4.5}
+p.temp <- ggplot(analysis_data, aes(x = temp_c, y = cnt)) +
+  geom_point(alpha = 0.45) +
+  geom_smooth(method = "lm", formula = y ~ x) +
+  labs(x = "Temperature (C)", y = "Daily bike rentals",
+       title = "Temperature and rentals")
+
+p.wind <- ggplot(analysis_data, aes(x = wind_mph, y = cnt)) +
+  geom_point(alpha = 0.45) +
+  geom_smooth(method = "lm", formula = y ~ x) +
+  labs(x = "Wind speed (mph)", y = "Daily bike rentals",
+       title = "Wind speed and rentals")
+
+p.predictors <- ggplot(analysis_data, aes(x = temp_c, y = wind_mph)) +
+  geom_point(alpha = 0.45) +
+  geom_smooth(method = "lm", formula = y ~ x) +
+  labs(x = "Temperature (C)", y = "Wind speed (mph)",
+       title = "Temperature and wind speed")
+
+fig.bivariate <- (p.temp + p.wind + p.predictors) +
+  plot_layout(ncol = 3) + plot_annotation(tag_levels = "A")
+fig.bivariate
+
+ggsave(file.path(output_dir, "Figure_1_bivariate.png"),
+       fig.bivariate, width = 12, height = 4.5, dpi = 300)
+```
+
+Each point represents one day. Shaded bands show 95% confidence intervals for the fitted mean relationships.
+
+
+## Pairwise correlations
+
+```{r}
+correlation_matrix <- cor(analysis_data)
+dimnames(correlation_matrix) <- list(unname(variable_labels),
+                                     unname(variable_labels))
+correlation_table <- as.data.frame(correlation_matrix) |>
+  rownames_to_column("Variable")
+knitr::kable(correlation_table, digits = 2,
+             caption = "Pearson correlations in the analysis sample")
+```
+
+When predictors are highly correlated, different combinations of their coefficients can produce similar predictions, creating a ridge in the likelihood surface and making the individual coefficients harder to estimate precisely. Here, a low correlation between temperature and wind speed makes it easier to estimate their separate associations with bike rentals.
+
+# 3. Regression analysis
+
+## Wind speed only
+
+```{r}
+m.wind <- lm(cnt ~ wind_mph, data = bikes)
+summary(m.wind)
+
+round(cbind(
+  Estimate = coef(m.wind),
+  confint(m.wind)
+), digits = 2)
+```
+
+In the wind-only regression, each additional 1 mph of wind speed was associated with 87.51 fewer daily bike rentals (95% CI for the slope [−113.88, −61.13]), t(729) = −6.51, p < .001. The confidence interval indicates uncertainty about the size of the association: the estimates are compatible with approximately 61 to 114 fewer daily rentals per additional mph. The interval lies entirely below zero, supporting a negative association. Wind speed alone explained 5.5% of the variation in daily rentals (R² = .055). Thus, although the data provided clear evidence of a negative association, wind speed alone accounted for a relatively small proportion of rental variation. 
+
+## Temperature only
+
+```{r}
+m.temp <- lm(cnt ~ temp_c, data = bikes)
+summary(m.temp)
+
+round(cbind(
+  Estimate = coef(m.temp),
+  confint(m.temp)
+), digits = 2)
+```
+
+In the temperature-only regression, each additional 1°C was associated with 141.29 more daily bike rentals (95% CI [128.54, 154.04]), t(729) = 21.76, p < .001. The confidence interval indicates uncertainty about the magnitude of the association, with values compatible with the data ranging from approximately 129 to 154 additional daily rentals per degree Celsius. The interval lies entirely above zero, supporting a positive association. Temperature alone explained 39.4% of the variation in daily rentals (R² = .394), compared with 5.5% for wind speed alone. Thus, temperature provided more information about daily rentals than wind speed in these separate linear models. 
+
+## Temperature and wind speed
+
+```{r}
+m.both <- lm(cnt ~ temp_c + wind_mph, data = bikes)
+summary(m.both)
+
+round(cbind(
+  Estimate = coef(m.both),
+  confint(m.both)
+), digits = 2)
+```
+
+Holding wind speed constant, each additional 1°C was associated with 136.35 more daily bike rentals (95% CI [123.63, 149.07]), t(728) = 21.05, p < .001. The confidence interval suggests an association of approximately 124 to 149 additional daily rentals per degree Celsius and lies entirely above zero.
+Holding temperature constant, each additional 1 mph of wind speed was associated with 51.82 fewer daily rentals (95% CI for the slope [−72.89, −30.75]), t(728) = −4.83, p < .001. This interval is compatible with approximately 31 to 73 fewer daily rentals per additional mph and lies entirely below zero.
+Together, temperature and wind speed explained 41.3% of the variation in daily rentals (R² = .413), compared with 39.4% for temperature alone. Adding wind speed therefore increased the explained variation by approximately 1.9 percentage points.
+
+
+## Why does the wind coefficient change
+
+Temperature and wind speed have a weak negative correlation in this sample. Windier days therefore tend to be colder, while higher temperature is associated with more rentals. The wind-only coefficient includes this accompanying temperature-related variation. Holding temperature constant, the estimated negative wind association is smaller. These are different conditional comparisons, rather than competing estimates of a single causal effect.
+
+The following figure groups days into temperature quartiles. Grouping only approximately holds temperature constant; it does not reproduce the exact adjustment for continuous temperature in `m.both`. The grouped model assumes a common wind slope and different group intercepts, as in the teacher's illustration. Parallel lines are therefore a modelling choice, not evidence that independently fitted group slopes are identical.
+
+```{r temperature-groups, fig.width=10, fig.height=5}
+temp_breaks <- quantile(analysis_data$temp_c,
+                        probs = seq(0, 1, 0.25), names = FALSE)
+bikes_grouped <- analysis_data |>
+  mutate(temp_group = cut(temp_c, breaks = temp_breaks,
+                          include.lowest = TRUE, dig.lab = 4))
+
+temp_group_summary <- bikes_grouped |>
+  group_by(temp_group) |>
+  summarise(N = n(), Temperature_min = min(temp_c),
+            Temperature_max = max(temp_c),
+            Mean_rentals = mean(cnt), .groups = "drop")
+knitr::kable(temp_group_summary, digits = 2,
+             caption = "Temperature quartile groups used in the figure")
+
+m.temp_groups <- lm(cnt ~ wind_mph + temp_group,
+                    data = bikes_grouped)
+
+# Plot each line only over its group's observed wind-speed range.
+group_lines <- bikes_grouped |>
+  group_by(temp_group) |>
+  reframe(wind_mph = seq(min(wind_mph), max(wind_mph),
+                          length.out = 100))
+group_lines$predicted <- predict(m.temp_groups, newdata = group_lines)
+
+p.grouped <- ggplot(bikes_grouped,
+                     aes(wind_mph, cnt, colour = temp_group)) +
+  geom_point(alpha = 0.5) +
+  geom_line(data = group_lines, aes(y = predicted), linewidth = 0.9) +
+  labs(x = "Wind speed (mph)", y = "Daily bike rentals",
+       colour = "Temperature (C)", title = "By temperature quartile")
+
+fig.grouped <- ((p.wind + labs(title = "Unadjusted association")) +
+                p.grouped) +
+  plot_layout(ncol = 2) + plot_annotation(tag_levels = "A")
+fig.grouped
+
+ggsave(file.path(output_dir, "Figure_2_wind_temperature_groups.png"),
+       fig.grouped, width = 10, height = 5, dpi = 300)
+```
+
+## Regression results for Excel
+
+```{r export-results}
+models <- list("Wind only" = m.wind,
+               "Temperature only" = m.temp,
+               "Both" = m.both)
+
+# Three rows per term: coefficient with stars, 95% CI, two-sided p value.
+format_model <- function(m) {
+  estimates <- cbind(coef(m), confint(m), p = coef(summary(m))[, 4])
+  terms <- c("(Intercept)", "temp_c", "wind_mph")
+  estimates <- estimates[match(terms, rownames(estimates)), , drop = FALSE]
+  p <- estimates[, 4]
+  stars <- ifelse(is.na(p), "", ifelse(p < .001, "***",
+                    ifelse(p < .01, "**", ifelse(p < .05, "*", ""))))
+  cells <- ifelse(is.na(estimates[, 1]), "--",
+                  sprintf("%.2f%s", estimates[, 1], stars))
+  intervals <- ifelse(is.na(estimates[, 1]), "",
+                      sprintf("[%.2f, %.2f]", estimates[, 2], estimates[, 3]))
+  p_values <- ifelse(is.na(p), "", format.pval(p, digits = 3, eps = .001))
+  c(as.vector(rbind(cells, intervals, p_values)),
+    nobs(m), sprintf("%.3f", summary(m)$r.squared),
+    sprintf("%.3f", summary(m)$adj.r.squared))
+}
+
+regression_table <- data.frame(
+  Variable = c("Intercept", "", "p value", "Temperature (C)", "", "p value",
+               "Wind speed (mph)", "", "p value",
+               "N", "R-squared", "Adjusted R-squared"),
+  sapply(models, format_model), check.names = FALSE
+)
+knitr::kable(regression_table, row.names = FALSE, align = c("l", "c", "c", "c"),
+             caption = "Regression results: coefficients, 95% CIs and p values")
+
+excel_tables <- list(Descriptive = descriptive_stats,
+                     Correlations = correlation_table,
+                     Regression = regression_table)
+wb <- createWorkbook()
+for (sheet in names(excel_tables)) {
+  addWorksheet(wb, sheet)
+  writeData(wb, sheet, excel_tables[[sheet]])
+  setColWidths(wb, sheet, cols = seq_len(ncol(excel_tables[[sheet]])),
+               widths = "auto")
+}
+addStyle(wb, "Regression", createStyle(halign = "center"),
+         rows = 1:(nrow(regression_table) + 1), cols = 2:4, gridExpand = TRUE)
+writeData(wb, "Regression",
+          "Note: Unstandardised b; 95% CI below; then two-sided p value. * p < .05; ** p < .01; *** p < .001.",
+          startRow = nrow(regression_table) + 3, colNames = FALSE)
+saveWorkbook(wb, file.path(output_dir, "bike_sharing_results.xlsx"),
+              overwrite = TRUE)
+```
+
+Note: Each coefficient is followed by its 95% confidence interval in brackets and then its two-sided p value. * p < .05; ** p < .01; *** p < .001. A dash indicates that the variable is not included in the model.
+
+
+# 4. Temperature and rentals by month
+
+```{r}
+ggplot(bikes, aes(x=temp_c, y=cnt)) +
+  geom_point(alpha=0.5) +
+  geom_smooth(method="lm", se=FALSE) +
+  facet_wrap(~mnth, ncol=4) +
+  labs(x="Temperature (C)", y="Daily bike rentals",
+       title="Temperature and bike rentals by month")
+```
+
+The fitted association between temperature and daily bike rentals varied across months. Most months showed a positive slope, whereas June, July and November showed negative slopes. September’s fitted line was nearly flat. Therefore, the positive association in the overall temperature-only model was not consistent across all months.
+
+```{r}
+m.common <- lm(cnt ~ temp_c + factor(mnth), data = bikes)
+m.month  <- lm(cnt ~ temp_c * factor(mnth), data = bikes)
+
+anova(m.common, m.month)
+
+bikes |>
+  group_by(mnth) |>
+  group_modify(~ broom::tidy(lm(cnt ~ temp_c, data = .x), conf.int = TRUE)) |>
+  filter(term == "temp_c") |>
+  select(mnth, estimate, conf.low, conf.high, p.value)
+```
+
+```{r monthly-temperature-results}
+monthly_slopes <- bikes |>
+  group_by(mnth) |>
+  group_modify(~ broom::tidy(lm(cnt ~ temp_c, data = .x), conf.int = TRUE)) |>
+  ungroup() |>
+  filter(term == "temp_c") |>
+  mutate(Month = factor(month.abb[mnth], levels = month.abb))
+
+monthly_slopes |>
+  transmute(
+    Month,
+    Estimate = sprintf("%.1f", estimate),
+    `95% CI` = sprintf("[%.1f, %.1f]", conf.low, conf.high),
+    `p value` = format.pval(p.value, digits = 3, eps = 0.001)
+  ) |>
+  knitr::kable(
+    align = c("l", "r", "r", "r"),
+    caption = "Monthly temperature slopes for daily bike rentals (rentals per 1°C)"
+  )
+
+p.monthly_slopes <- ggplot(monthly_slopes, aes(x = Month, y = estimate)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  geom_pointrange(aes(ymin = conf.low, ymax = conf.high)) +
+  labs(
+    x = NULL,
+    y = "Change in daily rentals per 1°C",
+    title = "Temperature and bike rentals by month",
+    caption = "Points are monthly slope estimates. Bars show 95% confidence intervals."
+  ) +
+  theme_minimal()
+
+p.monthly_slopes
+```
+
+The intervals were entirely above zero from January to May and in October and December, and entirely below zero in June and July. In July, a 1°C higher temperature was associated with an estimated 158 fewer daily rentals (95% CI [−287, −30]). The intervals for August, September and November included zero. The overall positive association therefore obscured a different pattern within some months, particularly June and July.
+
+
+
