@@ -12,7 +12,7 @@ Similarly Figure 3 shows the slopes in 4, so consolidate.
 
 
 
-# Feedback: bike sharing regression exercise
+# AI Feedback (Claude)
 
 Excellent work. Your numbers match the model answer exactly, and every estimate is reported in full, with its 95% CI, $t$, degrees of freedom, and $p$ value. Some highlights:
 
